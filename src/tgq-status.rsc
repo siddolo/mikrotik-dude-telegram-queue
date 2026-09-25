@@ -1,0 +1,20 @@
+:local base "tg-queue";
+:local stateFn [:parse [/system script get [find where name="tgq-state"] source]];
+:local st [$stateFn root=$base action="load"];
+:local conf [:deserialize from=json options=json.no-string-conversion value=[/file get [find where name=($base . "/config.json")] contents]];
+:local pending [/file find where name~"^tg-queue/pending/.*[.]ready\$"];
+:local failed [/file find where name~"^tg-queue/failed/.*[.]ready\$"];
+:local temporary [/file find where name~"^tg-queue/pending/.*[.]tmp\$"];
+:local remaining ([:tonum ($st->"notBeforeNs")] - [:tonsec [:timestamp]]);
+:if ($remaining < 0) do={ :set remaining 0; };
+:local pendingBytes 0;
+:local oldestNs [:tonsec [:timestamp]];
+:foreach item in=$pending do={
+    :local entryPath [/file get $item name];
+    :set pendingBytes ($pendingBytes + [/file get $item size]);
+    :local born [:tonum [:pick $entryPath 17 36]];
+    :if (([:typeof $born] = "num") && ($born < $oldestNs)) do={ :set oldestNs $born; };
+};
+:local age (([:tonsec [:timestamp]] - $oldestNs) / 1000000000);
+:local output {"enabled"=($conf->"enabled");"pending"=[:len $pending];"pendingBytes"=$pendingBytes;"oldestAgeSeconds"=$age;"failed"=[:len $failed];"incomplete"=[:len $temporary];"status"=($st->"status");"retryInSeconds"=($remaining / 1000000000);"sentMessages"=($st->"sentMessages");"sentEvents"=($st->"sentEvents");"errors"=($st->"errors");"lastError"=($st->"lastError");"lastSuccessNs"=($st->"lastSuccessNs");"minSpacingMs"=3100};
+:put [:serialize to=json options=json.no-string-conversion value=$output];

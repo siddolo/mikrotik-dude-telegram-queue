@@ -1,0 +1,38 @@
+# Python cache, virtual environments and test output
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# Local credentials and configuration
+.env
+.env.*
+!.env.example
+*.local.rsc
+*.private.rsc
+/secrets/
+/local/
+
+# Router diagnostics, backups and exports
+*.rif
+*.backup
+*.decoded/
+*.log
+/exports/
+/artifacts/
+
+# Downloaded runtime state and test queues
+/tg-queue/
+/tgq-test-*/
+
+# Editor and operating-system files
+.DS_Store
+*~
+*.swp
+*.swo

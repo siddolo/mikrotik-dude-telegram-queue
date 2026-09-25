@@ -1,0 +1,1 @@
+:local enqueue [:parse [/system script get [find where name="tgq-enqueue"] source]]; $enqueue dev=("[Device.Name]") probe=("[Probe.Name]") state=("[Service.Status]") problem=("[Service.ProblemDescription]")
