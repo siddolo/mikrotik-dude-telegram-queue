@@ -24,9 +24,22 @@
 :local tmp ($base . "/pending/" . $eventId . ".tmp");
 :local ready ($base . "/pending/" . $eventId . ".ready");
 /file add name=$tmp type=file contents=$encoded;
-:if ([/file get [find where name=$tmp] size] != [:len $encoded]) do={ :error "TGQ: event size mismatch"; };
-/file set [find where name=$tmp] name=$ready;
-:set completedId $eventId;
+# Refresh metadata: a newly added file may not yet be visible to find/get.
+# Retry verification and publication for up to 2s of waiting; never recreate it.
+:local publishError "file not visible";
+:for attempt from=0 to=20 do={
+    :onerror publishFailure in={
+        :local matches [/file print as-value proplist=name,size where name=$tmp];
+        :if ([:len $matches] != 1) do={ :error "expected exactly one temporary file"; };
+        :local item [:pick $matches 0];
+        :if (($item->"size") != [:len $encoded]) do={ :error "event size mismatch"; };
+        /file set ($item->".id") name=$ready;
+        :set completedId $eventId;
+    } do={ :set publishError [:tostr $publishFailure]; };
+    :if ([:len $completedId] > 0) do={ :break; };
+    :if ($attempt < 20) do={ :delay 100ms; };
+};
+:if ([:len $completedId] = 0) do={ :error ("TGQ: event publication timed out: " . $publishError); };
 } do={ :set enqueueError [:tostr $enqueueFailure]; };
 :if ([:len $enqueueError] > 0) do={
     :log error ("TGQ: enqueue failed: " . $enqueueError);

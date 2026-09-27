@@ -1,6 +1,7 @@
 """Contract tests on isolated queue storage; mocked transport never contacts Telegram."""
 from concurrent.futures import ThreadPoolExecutor
 import json
+import time
 from router import FIXTURES, SRC, command, function, install_script, quote
 from deploy import MARKER, initialize, initial_state, write_json
 
@@ -50,6 +51,47 @@ def check(label, condition):
     print("PASS " + label, flush=True)
 
 
+def test_publication_retries():
+    """Inject metadata faults into a test copy of the installed producer."""
+    source = command(':put [/system script get [find where name="tgq-enqueue"] source]')
+    source = source.replace("TGQ: enqueue failed:", "TGQ TEST: enqueue failed:")
+    metadata = ':local matches [/file print as-value proplist=name,size where name=$tmp];'
+    item = ':local item [:pick $matches 0];'
+    assert source.count(metadata) == source.count(item) == 1, "Install the current tgq-enqueue before testing"
+    name = "tgq-test-enqueue-retry"
+    args = f'root={quote(BASE)} dev=("TEST-RETRY") probe="ping" state="up" problem=""'
+    reset()
+    try:
+        transient = source.replace(metadata, metadata + '\n'
+                                   '        :if ($attempt < 3) do={ :set matches [:toarray ""]; };')
+        print(install_script(name, transient))
+        identifier = command(function(name, args + ' strict=true'))
+        event = read_json(BASE + "/pending/" + identifier + ".ready")
+        check("transient missing metadata retried and published", event["id"] == identifier and event["status"] == "up")
+        check("retry does not duplicate or leave unfinished events", len(paths("^" + BASE + "/pending/")) == 1)
+        check("producer retries never use the transport", not paths("^" + BASE + "/trace-"))
+
+        reset()
+        mismatch = source.replace(item, item + '\n        :set ($item->"size") -1;')
+        print(install_script(name, mismatch))
+        print("Expect two TGQ TEST error logs from persistent-mismatch checks", flush=True)
+        started = time.monotonic()
+        rejected = False
+        try:
+            command(function(name, args + ' strict=true'))
+        except RuntimeError as error:
+            rejected = "event publication timed out: event size mismatch" in str(error)
+        check("persistent mismatch fails after retries", rejected and time.monotonic() - started >= 2)
+        check("mismatched event stays unpublished", len(paths("^" + BASE + "/pending/.*[.]tmp$")) == 1
+              and not paths("^" + BASE + "/pending/.*[.]ready$"))
+        result = command(function(name, args))
+        check("publication failure is contained for Dude", result == ""
+              and len(paths("^" + BASE + "/pending/.*[.]tmp$")) == 2
+              and not paths("^" + BASE + "/pending/.*[.]ready$"))
+    finally:
+        command(f'/system script remove [find where name={quote(name)}]')
+
+
 def main():
     initialize(BASE, test=True)
     print(install_script("tgq-test-send", (FIXTURES / "tgq-test-send.rsc").read_text()))
@@ -90,11 +132,15 @@ def main():
     with ThreadPoolExecutor(max_workers=5) as pool:
         identifiers = list(pool.map(enqueue, range(20)))
     check("concurrent producers retain all events", len(set(identifiers)) == 20 and len(paths("^" + BASE + "/pending/")) == 20)
+    check("concurrent producers publish every event", len(paths("^" + BASE + "/pending/.*[.]ready$")) == 20
+          and not paths("^" + BASE + "/pending/.*[.]tmp$"))
     drain()
     traces = [read_json(path) for path in paths("^" + BASE + "/trace-")]
     check("batching reduces sends", 0 < len(traces) < 20)
     check("batch payloads valid and under 3500 bytes", all(len(json.loads(t["payload"])["text"].encode()) <= 3500 for t in traces))
     check("all batched events acknowledged", state()["sentEvents"] == 20)
+
+    test_publication_retries()
 
     reset()
     enqueue()

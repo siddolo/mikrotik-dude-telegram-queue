@@ -76,7 +76,9 @@
                 /file add name=$archivePath type=file contents=[/file get [$exactFile entry=$entryPath] contents];
             };
         };
-        :local part ("\E2\9A\A0\EF\B8\8F [" . [$short text=($event->"status") maxBytes=40] . "] " . [$short text=($event->"device") maxBytes=200] . "\nServizio: " . [$short text=($event->"probe") maxBytes=120] . "\nProblema: " . [$short text=($event->"problem") maxBytes=1800] . "\nOra: " . ($event->"time") . "\nID: " . ($event->"id"));
+        :local icon "\E2\9A\A0\EF\B8\8F";
+        :if (($event->"status") = "up") do={ :set icon "\E2\9C\85"; };
+        :local part ($icon . " [" . [$short text=($event->"status") maxBytes=40] . "] " . [$short text=($event->"device") maxBytes=200] . "\nServizio: " . [$short text=($event->"probe") maxBytes=120] . "\nProblema: " . [$short text=($event->"problem") maxBytes=1800] . "\nOra: " . ($event->"time") . "\nID: " . ($event->"id"));
         :if (([:len $message] + [:len $part] + 2) > 3500) do={ :break; };
         :if ([:len $selected] > 0) do={ :set message ($message . "\n\n"); };
         :set message ($message . $part);
