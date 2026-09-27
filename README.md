@@ -2,6 +2,8 @@
 
 Coda persistente per inviare a Telegram le notifiche di **The Dude**, con raggruppamento degli eventi, limiti di frequenza e ritentativi in caso di errore.
 
+-*WARNING: vibe-coded material.*
+
 ```text
 The Dude → tgq-enqueue → file .tmp → verifica → file .ready → tgq-worker → Telegram
 ```
