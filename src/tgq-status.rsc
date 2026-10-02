@@ -16,5 +16,9 @@
     :if (([:typeof $born] = "num") && ($born < $oldestNs)) do={ :set oldestNs $born; };
 };
 :local age (([:tonsec [:timestamp]] - $oldestNs) / 1000000000);
+:local scheduler [/system scheduler find where name="tgq-tick"];
+:local schedulerEnabled false;
+:if ([:len $scheduler] = 1) do={ :set schedulerEnabled (![/system scheduler get $scheduler disabled]); };
 :local output {"enabled"=($conf->"enabled");"pending"=[:len $pending];"pendingBytes"=$pendingBytes;"oldestAgeSeconds"=$age;"failed"=[:len $failed];"incomplete"=[:len $temporary];"status"=($st->"status");"retryInSeconds"=($remaining / 1000000000);"sentMessages"=($st->"sentMessages");"sentEvents"=($st->"sentEvents");"errors"=($st->"errors");"lastError"=($st->"lastError");"lastSuccessNs"=($st->"lastSuccessNs");"minSpacingMs"=3100};
+:set ($output->"schedulerEnabled") $schedulerEnabled;
 :put [:serialize to=json options=json.no-string-conversion value=$output];

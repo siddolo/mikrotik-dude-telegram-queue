@@ -7,9 +7,16 @@
 :local limitNs 3100000000;
 :local exactFile do={
     :local wantedPath $entry;
-    :local matches [/file find where name=$wantedPath];
-    :if ([:len $matches] != 1) do={ :error "TGQ: expected exactly one file"; };
-    :return [:pick $matches 0];
+    # Refresh metadata and tolerate temporarily invisible files, as enqueue does.
+    :local count 0;
+    :for attempt from=0 to=20 do={
+        :local matches [/file print as-value proplist=name where name=$wantedPath];
+        :set count [:len $matches];
+        :if ($count = 1) do={ :return (([:pick $matches 0])->".id"); };
+        :if ($count > 1) do={ :break; };
+        :if ($attempt < 20) do={ :delay 100ms; };
+    };
+    :error ("TGQ: expected exactly one file: " . $wantedPath . "; matches=" . $count);
 };
 # Byte-safe prefix for UTF-8. RouterOS string indexes count bytes.
 :local short do={
@@ -25,8 +32,10 @@
 # Complete acknowledged deletions after an interrupted previous run.
 :foreach entryPath in=($st->"acked") do={
     :if ([:pick $entryPath 0 ([:len $base] + 9)] != ($base . "/pending/")) do={ :error "TGQ: invalid acknowledged path"; };
-    :local ids [/file find where name=$entryPath];
-    :if ([:len $ids] > 0) do={ /file remove [$exactFile entry=$entryPath]; };
+    # One refreshed lookup: avoid a stale find followed by a second lookup.
+    :local rows [/file print as-value proplist=name where name=$entryPath];
+    :if ([:len $rows] > 1) do={ :error ("TGQ: duplicate acknowledged path: " . $entryPath); };
+    :if ([:len $rows] = 1) do={ /file remove (([:pick $rows 0])->".id"); };
 };
 :set ($st->"acked") [:toarray ""];
 :while (([:tonsec [:timestamp]] - $start) < 45000000000) do={

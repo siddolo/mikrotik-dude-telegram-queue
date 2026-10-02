@@ -84,6 +84,7 @@ Comandi da eseguire sul router:
 | Campo di `tgq-status` | Significato |
 | --- | --- |
 | `enabled` | Invio abilitato nella configurazione; controllare anche lo scheduler |
+| `schedulerEnabled` | Scheduler `tgq-tick` presente e abilitato; se `false`, il worker non parte automaticamente |
 | `pending` | Numero di file **`.ready`**, pronti all'invio |
 | `incomplete` | Numero di file **`.tmp`**, esclusi dall'invio |
 | `pendingBytes`, `oldestAgeSeconds` | Dimensione totale ed età dell'evento `.ready` più vecchio |
@@ -152,6 +153,8 @@ Il file `tg-queue/config.json` contiene:
 | Errore interno, stato o configurazione illeggibili | Arresta il worker e disabilita lo scheduler |
 
 Dopo aver risolto un errore che ha disabilitato lo scheduler, eseguire `tgq-resume` e controllare stato e log.
+
+Il worker aggiorna i metadati dei file prima di risolverne l'ID e ritenta per un massimo di 2 secondi se un file è temporaneamente invisibile. Gli errori persistenti indicano il percorso e il numero di corrispondenze. Il recupero delle cancellazioni già confermate usa un'unica lettura aggiornata e tollera file già rimossi. `status=ready` descrive l'ultimo esito memorizzato: verificare anche `schedulerEnabled=true`.
 
 ## Sviluppo e test
 

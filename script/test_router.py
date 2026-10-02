@@ -6,6 +6,7 @@ from router import FIXTURES, SRC, command, function, install_script, quote
 from deploy import MARKER, initialize, initial_state, write_json
 
 BASE = "tgq-test-20260925"
+SENDER = "tgq-test-send"
 
 
 def read_json(path):
@@ -27,7 +28,7 @@ def reset(max_batch=30):
     for slot in "ab":
         write_json(BASE + "/state-" + slot + ".json", initial_state())
     write_json(BASE + "/config.json", {"managedBy": MARKER, "enabled": True, "chatId": "-100TEST",
-                                      "maxBatchEvents": max_batch, "sender": "tgq-test-send"})
+                                      "maxBatchEvents": max_batch, "sender": SENDER})
     write_json(BASE + "/reply.json", {"ok": True, "messageId": 1})
 
 
@@ -92,6 +93,64 @@ def test_publication_retries():
         command(f'/system script remove [find where name={quote(name)}]')
 
 
+def test_worker_file_retries(source=None):
+    """Exercise metadata refresh and acknowledged cleanup with mocked delivery."""
+    if source is None:
+        source = command(':put [/system script get [find where name="tgq-core"] source]')
+    metadata = ':local matches [/file print as-value proplist=name where name=$wantedPath];'
+    assert source.count(metadata) == 1, "Install the current tgq-core before testing"
+    name = BASE + "-core-retry"
+
+    def run():
+        return command(function(name, f'root={quote(BASE)}'), timeout=75)
+
+    try:
+        reset()
+        identifier = enqueue(dev="TEST-WORKER-METADATA")
+        transient = source.replace(metadata, metadata + '\n'
+                                   '        :if ($attempt < 3) do={ :set matches [:toarray ""]; };')
+        print(install_script(name, transient))
+        check("worker retries transient missing metadata", run() == "empty")
+        check("metadata retries deliver exactly once", state()["sentEvents"] == 1
+              and len(paths("^" + BASE + "/trace-")) == 1
+              and not paths("^" + BASE + "/pending/"))
+        check("already removed acknowledgment is harmless", run() == "empty"
+              and state()["sentEvents"] == 1 and len(paths("^" + BASE + "/trace-")) == 1)
+
+        reset()
+        identifier = enqueue(dev="TEST-ALREADY-ACKED")
+        acknowledged = initial_state()
+        acknowledged.update(acked=[BASE + "/pending/" + identifier + ".ready"],
+                            sentEvents=1, sentMessages=1)
+        for slot in "ab":
+            write_json(BASE + "/state-" + slot + ".json", acknowledged)
+        print(install_script(name, source))
+        check("interrupted acknowledged deletion recovered", run() == "empty"
+              and not paths("^" + BASE + "/pending/")
+              and not paths("^" + BASE + "/trace-") and state()["sentEvents"] == 1)
+        check("repeated acknowledged cleanup is idempotent", run() == "empty"
+              and not paths("^" + BASE + "/trace-"))
+
+        reset()
+        identifier = enqueue(dev="TEST-PERSISTENT-METADATA")
+        missing = source.replace(metadata, metadata + '\n        :set matches [:toarray ""];')
+        print(install_script(name, missing))
+        rejected = False
+        try:
+            run()
+        except RuntimeError as error:
+            rejected = identifier + ".ready; matches=0" in str(error)
+        check("persistent metadata failure identifies the exact path", rejected)
+        check("persistent metadata failure retains the unsent event", state()["sentEvents"] == 0
+              and len(paths("^" + BASE + "/pending/.*[.]ready$")) == 1
+              and not paths("^" + BASE + "/failed/") and not paths("^" + BASE + "/trace-"))
+        print(install_script(name, source))
+        check("retained event delivered after metadata recovery", run() == "empty"
+              and state()["sentEvents"] == 1)
+    finally:
+        command(f'/system script remove [find where name={quote(name)}]')
+
+
 def main():
     initialize(BASE, test=True)
     print(install_script("tgq-test-send", (FIXTURES / "tgq-test-send.rsc").read_text()))
@@ -141,6 +200,7 @@ def main():
     check("all batched events acknowledged", state()["sentEvents"] == 20)
 
     test_publication_retries()
+    test_worker_file_retries()
 
     reset()
     enqueue()
